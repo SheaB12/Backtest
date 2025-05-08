@@ -10,7 +10,7 @@ API_KEY = os.getenv("POLYGON_API_KEY")
 BASE_URL = "https://api.polygon.io"
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../data")
 DATE_FORMAT = "%Y-%m-%d"
-START_DATE = datetime.now() - timedelta(days=7)  # For test, adjust later
+START_DATE = datetime(2021, 1, 1)
 END_DATE = datetime.now()
 MIN_PRICE = 1
 MAX_PRICE = 100
