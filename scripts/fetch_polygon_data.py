@@ -7,8 +7,13 @@ POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 BASE_URL = "https://api.polygon.io/v2/aggs/ticker"
 
 # Configure output directory
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-os.makedirs(OUTPUT_DIR, exist_ok=True)  # Ensure directory exists
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data'))
+
+# Ensure OUTPUT_DIR exists and is a directory
+if not os.path.exists(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
+elif not os.path.isdir(OUTPUT_DIR):
+    raise NotADirectoryError(f"The path {OUTPUT_DIR} exists and is not a directory.")
 
 def fetch_polygon_aggregates(ticker, start_date, end_date, timespan="minute", limit=5000):
     url = f"{BASE_URL}/{ticker}/range/1/{timespan}/{start_date}/{end_date}"
