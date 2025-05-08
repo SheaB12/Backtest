@@ -47,7 +47,13 @@ def fetch_polygon_data(ticker, start_date, end_date):
     return df
 
 def save_to_csv(df, ticker):
-    os.makedirs(DATA_DIR, exist_ok=True)
+    # Ensure the directory exists
+    if not os.path.isdir(DATA_DIR):
+        try:
+            os.makedirs(DATA_DIR)
+        except FileExistsError:
+            pass  # Safe ignore if it’s a race condition
+
     file_path = os.path.join(DATA_DIR, f"{ticker.upper()}_1min.csv")
     df.to_csv(file_path, index=False)
     print(f"[+] Saved to {file_path}")
