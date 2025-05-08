@@ -1,14 +1,31 @@
 import os
-import pandas as pd
+import time
 import requests
+import pandas as pd
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 
-# --- Configuration ---
+# === CONFIG ===
 API_KEY = os.getenv("POLYGON_API_KEY")
 BASE_URL = "https://api.polygon.io"
-OUTPUT_DIR = os.path.abspath(os.path.join(".", "data"))
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../data")
+DATE_FORMAT = "%Y-%m-%d"
+START_DATE = datetime.now() - timedelta(days=7)  # For test, adjust later
+END_DATE = datetime.now()
+MIN_PRICE = 1
+MAX_PRICE = 100
+MIN_VOLUME = 1_000_000
+MIN_PERCENT_CHANGE = 5
 
+# === Ensure OUTPUT_DIR exists ===
+if os.path.exists(OUTPUT_DIR):
+    if not os.path.isdir(OUTPUT_DIR):
+        os.remove(OUTPUT_DIR)
+        os.makedirs(OUTPUT_DIR)
+else:
+    os.makedirs(OUTPUT_DIR)
+
+# === Helper Functions ===
 
 def fetch_grouped_daily(date_str):
     url = f"{BASE_URL}/v2/aggs/grouped/locale/us/market/stocks/{date_str}"
@@ -19,90 +36,91 @@ def fetch_grouped_daily(date_str):
     }
     response = requests.get(url, params=params)
     response.raise_for_status()
-    return response.json().get("results", [])
+    data = response.json()
+    return data.get("results", [])
 
-
-def fetch_news_tickers(date_str):
+def fetch_news(ticker, date_str):
     url = f"{BASE_URL}/v2/reference/news"
     params = {
+        "ticker": ticker,
         "published_utc.gte": f"{date_str}T00:00:00Z",
         "published_utc.lte": f"{date_str}T23:59:59Z",
         "apiKey": API_KEY
     }
-    tickers_with_news = set()
-    while url:
+    response = requests.get(url, params=params)
+    if response.status_code == 429:
+        time.sleep(2)
         response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
-        for article in data.get("results", []):
-            tickers_with_news.update([t['ticker'] for t in article.get("tickers", [])])
-        url = data.get("next_url", None)
-        params = {}  # already embedded in next_url
-    return tickers_with_news
-
+    response.raise_for_status()
+    data = response.json()
+    return len(data.get("results", [])) > 0
 
 def percent_change(open_price, close_price):
     if open_price == 0:
         return 0
     return ((close_price - open_price) / open_price) * 100
 
+# === Main Logic ===
 
-def process_month(year, month):
-    start_date = datetime(year, month, 1)
-    next_month = (start_date.replace(day=28) + timedelta(days=4)).replace(day=1)
-    end_date = next_month - timedelta(days=1)
+def collect_monthly_data(start_date, end_date):
+    current = start_date.replace(day=1)
+    while current <= end_date:
+        print(f"[+] Collecting {current.strftime('%Y-%m')}...")
+        month_data = []
 
-    current_date = start_date
-    all_data = []
+        month_end = (current + relativedelta(months=1)) - timedelta(days=1)
+        date = current
 
-    while current_date <= end_date and current_date < datetime.today():
-        date_str = current_date.strftime("%Y-%m-%d")
-        print(f"[+] Processing {date_str}")
+        while date <= month_end and date <= end_date:
+            date_str = date.strftime(DATE_FORMAT)
+            try:
+                results = fetch_grouped_daily(date_str)
+                for stock in results:
+                    try:
+                        ticker = stock["T"]
+                        open_price = stock["o"]
+                        close_price = stock["c"]
+                        volume = stock["v"]
+                        high = stock["h"]
+                        low = stock["l"]
+                        change = percent_change(open_price, close_price)
 
-        try:
-            daily_data = fetch_grouped_daily(date_str)
-            news_tickers = fetch_news_tickers(date_str)
+                        if (
+                            MIN_PRICE <= close_price <= MAX_PRICE
+                            and volume > MIN_VOLUME
+                            and change > MIN_PERCENT_CHANGE
+                            and fetch_news(ticker, date_str)
+                        ):
+                            month_data.append({
+                                "date": date_str,
+                                "ticker": ticker,
+                                "open": open_price,
+                                "high": high,
+                                "low": low,
+                                "close": close_price,
+                                "volume": volume,
+                                "percent_change": round(change, 2)
+                            })
+                    except Exception as e:
+                        print(f"[!] Error processing {stock.get('T')} on {date_str}: {e}")
+                time.sleep(1)  # Avoid rate limits
+            except Exception as e:
+                print(f"[!] Error fetching {date_str}: {e}")
+            date += timedelta(days=1)
 
-            for stock in daily_data:
-                ticker = stock.get("T")
-                open_price = stock.get("o", 0)
-                close_price = stock.get("c", 0)
-                high = stock.get("h", 0)
-                low = stock.get("l", 0)
-                volume = stock.get("v", 0)
+        # Save to CSV
+        if month_data:
+            df = pd.DataFrame(month_data)
+            filename = f"{current.strftime('%Y-%m')}-data.csv"
+            filepath = os.path.join(OUTPUT_DIR, filename)
+            df.to_csv(filepath, index=False)
+            print(f"[+] Saved {len(df)} entries to {filepath}")
+        else:
+            print(f"[!] No qualifying data for {current.strftime('%Y-%m')}")
 
-                if (
-                    1 <= close_price <= 100
-                    and volume > 1_000_000
-                    and percent_change(open_price, close_price) > 5
-                    and ticker in news_tickers
-                ):
-                    all_data.append({
-                        "date": date_str,
-                        "ticker": ticker,
-                        "open": open_price,
-                        "high": high,
-                        "low": low,
-                        "close": close_price,
-                        "volume": volume,
-                        "percent_change": round(percent_change(open_price, close_price), 2)
-                    })
+        current += relativedelta(months=1)
 
-        except Exception as e:
-            print(f"[!] Error on {date_str}: {e}")
+# === Entry Point ===
 
-        current_date += timedelta(days=1)
-
-    if all_data:
-        df = pd.DataFrame(all_data)
-        output_file = os.path.join(OUTPUT_DIR, f"{year}-{month:02d}-data.csv")
-        df.to_csv(output_file, index=False)
-        print(f"[✓] Saved {len(df)} rows to {output_file}")
-    else:
-        print("[*] No qualifying data found this month.")
-
-
-# Example: Last full month
-today = datetime.today()
-last_month = (today.replace(day=1) - timedelta(days=1))
-process_month(last_month.year, last_month.month)
+if __name__ == "__main__":
+    collect_monthly_data(START_DATE, END_DATE)
