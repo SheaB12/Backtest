@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  backtest:
+  gap-and-go:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,11 +18,20 @@ jobs:
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pandas
 
-      - name: Run Gap and Go backtest engine
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      - name: Ensure data directory exists
+        run: |
+          mkdir -p data
+
+      - name: Merge monthly CSVs into yearly files
+        run: |
+          echo "Merging monthly CSV files into yearly..."
+          python scripts/merge_monthly_to_yearly.py
+
+      - name: Run gap_and_go backtest
         run: |
           echo "Running gap_and_go_backtest.py..."
           python Backtesting/gap_and_go_backtest.py
