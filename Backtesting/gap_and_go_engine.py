@@ -3,18 +3,30 @@ import pandas as pd
 
 DATA_DIR = "data"
 RESULTS_CSV = "gap_and_go_results.csv"
+ML_DATASET_CSV = "gap_and_go_ml_dataset.csv"
 SUMMARY_CSV = "gap_and_go_summary.csv"
 
 def load_data_files():
     return sorted([f for f in os.listdir(DATA_DIR) if f.endswith("-data.csv")])
 
-def simulate_trade(row):
+def simulate_trade_and_label(row):
     open_price = row["open"]
     high_price = row["high"]
     close_price = row["close"]
+    volume = row["volume"]
+    prev_close = row.get("prev_close", open_price / (1 + row["percent_change"] / 100))
 
+    # Features
+    gap_pct = (open_price - prev_close) / prev_close * 100
+    intraday_range_pct = (high_price - open_price) / open_price * 100
+    close_to_open_pct = (close_price - open_price) / open_price * 100
+    day_of_week = pd.to_datetime(row["date"]).dayofweek  # 0=Mon, 4=Fri
+
+    # Label
     target_gain = 0.02  # 2%
     actual_gain = (high_price - open_price) / open_price
+    outcome = "win" if actual_gain >= target_gain else "loss"
+    label = 1 if outcome == "win" else 0
 
     result = {
         "date": row["date"],
@@ -22,16 +34,20 @@ def simulate_trade(row):
         "open": open_price,
         "high": high_price,
         "close": close_price,
-        "volume": row["volume"],
+        "volume": volume,
         "percent_change": row["percent_change"],
+        "gap_pct": gap_pct,
+        "intraday_range_pct": intraday_range_pct,
+        "close_to_open_pct": close_to_open_pct,
+        "day_of_week": day_of_week,
         "gain_pct": actual_gain * 100,
-        "outcome": "win" if actual_gain >= target_gain else "loss",
+        "outcome": outcome,
+        "label": label
     }
+
     return result
 
-def summarize_results():
-    df = pd.read_csv(RESULTS_CSV)
-
+def summarize_results(df):
     wins = df[df["outcome"] == "win"]
     losses = df[df["outcome"] == "loss"]
     total = len(df)
@@ -54,18 +70,20 @@ if __name__ == "__main__":
     all_trades = []
 
     for file in all_files:
-        print(f"[+] Backtesting {file}...")
+        print(f"[+] Processing {file}...")
         df = pd.read_csv(os.path.join(DATA_DIR, file))
 
         # Strategy criteria: Gap and Go (gap up > 5%)
         filtered = df[df["percent_change"] > 5]
 
-        trades = [simulate_trade(row) for _, row in filtered.iterrows()]
+        trades = [simulate_trade_and_label(row) for _, row in filtered.iterrows()]
         all_trades.extend(trades)
 
     if all_trades:
-        pd.DataFrame(all_trades).to_csv(RESULTS_CSV, index=False)
-        print(f"[+] Saved {len(all_trades)} trades to {RESULTS_CSV}")
-        summarize_results()
+        df_all = pd.DataFrame(all_trades)
+        df_all.to_csv(RESULTS_CSV, index=False)
+        df_all.to_csv(ML_DATASET_CSV, index=False)
+        print(f"[+] Saved {len(df_all)} trades to {RESULTS_CSV} and {ML_DATASET_CSV}")
+        summarize_results(df_all)
     else:
-        print("[!] No trades matched the strategy.")
+        print("[!] No qualifying trades found. No data saved.")
