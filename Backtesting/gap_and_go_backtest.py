@@ -94,7 +94,7 @@ def summarize_results():
     print("[+] Backtest complete. Summary written to summary.csv")
 
 if __name__ == "__main__":
-    for year in range(2021, 2026):  # Change range as needed
+    for year in range(2015, 2026):  # Change range as needed
         print(f"[+] Backtesting {year}...")
         run_backtest_for_year(year)
 
