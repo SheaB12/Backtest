@@ -21,7 +21,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas matplotlib
 
-      - name: Ensure performance is a package
+      - name: Ensure package structure
         run: |
           touch backtesting/__init__.py
 
@@ -30,3 +30,14 @@ jobs:
           echo "Running performance visualizer..."
           export PYTHONPATH="${{ github.workspace }}"
           python backtesting/performance_visualizer.py
+
+      - name: Zip performance plots
+        run: |
+          cd backtesting/performance_charts
+          zip -r performance_plots.zip *.png
+
+      - name: Upload zipped plots as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-plots
+          path: backtesting/performance_charts/performance_plots.zip
