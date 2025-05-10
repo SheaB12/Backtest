@@ -25,4 +25,4 @@ jobs:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
           echo "Running gap_and_go_backtest.py..."
-          python backtesting/gap_and_go_backtest.py
+          python Backtesting/gap_and_go_backtest.py
