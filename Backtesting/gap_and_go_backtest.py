@@ -1,94 +1,72 @@
 import os
-import time
+import requests
 import pandas as pd
-from polygon import RESTClient
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 
-# Load API key
-load_dotenv()
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
-
-client = RESTClient(POLYGON_API_KEY)
+API_KEY = os.getenv("POLYGON_API_KEY")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../data")
-
 START_DATE = datetime(2015, 1, 1)
-END_DATE = datetime.now()
+END_DATE = datetime.today()
 
 def fetch_grouped_data(date_str):
-    try:
-        return client.get_grouped_daily_aggs(date_str, adjusted=True)
-    except Exception as e:
-        print(f"[!] Error fetching grouped data for {date_str}: {e}")
+    url = (
+        f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{date_str}"
+        f"?adjusted=true&include_otc=false&apiKey={API_KEY}"
+    )
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json().get("results", [])
+    else:
+        print(f"[!] Error fetching grouped data for {date_str}: {response.text}")
         return []
 
-def fetch_news(ticker, date_str):
-    try:
-        news = client.list_ticker_news(ticker=ticker, published_utc=date_str, order="desc", limit=1)
-        return len(news.results) > 0
-    except Exception:
-        return False
-
-def process_day(day):
-    results = []
-    day_str = day.strftime("%Y-%m-%d")
-    aggs = fetch_grouped_data(day_str)
-    for agg in aggs:
-        if agg.volume < 1_000_000:
-            continue
-        if agg.close < 1 or agg.close > 100:
-            continue
-        if agg.open == 0:
-            continue
-        percent_change = ((agg.close - agg.open) / agg.open) * 100
-        if percent_change < 5:
-            continue
-        if not fetch_news(agg.ticker, day_str):
-            continue
-
-        results.append({
-            "date": day_str,
-            "ticker": agg.ticker,
-            "open": agg.open,
-            "high": agg.high,
-            "low": agg.low,
-            "close": agg.close,
-            "volume": agg.volume,
-            "percent_change": round(percent_change, 2)
-        })
-        time.sleep(0.25)  # throttle to avoid hitting news rate limits
-    return results
-
-def save_yearly_data(year, data):
-    if not data:
-        print(f"[!] No qualifying entries for {year}")
-        return
-    df = pd.DataFrame(data, columns=[
-        "date", "ticker", "open", "high", "low", "close", "volume", "percent_change"
-    ])
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    file_path = os.path.join(OUTPUT_DIR, f"{year}-data.csv")
-    df.to_csv(file_path, index=False)
-    print(f"[+] Saved {len(df)} entries to {file_path}")
-
 def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     current = START_DATE
-    year_data = []
-    last_year = current.year
+    yearly_data = {}
 
     while current <= END_DATE:
-        print(f"[+] Processing {current.strftime('%Y-%m-%d')}...")
-        if current.year != last_year:
-            save_yearly_data(last_year, year_data)
-            year_data = []
-            last_year = current.year
+        date_str = current.strftime("%Y-%m-%d")
+        print(f"[+] Processing {date_str}...")
+        results = fetch_grouped_data(date_str)
 
-        day_data = process_day(current)
-        year_data.extend(day_data)
+        valid_rows = []
+        for item in results:
+            ticker = item.get("T")
+            close = item.get("c", 0)
+            open_ = item.get("o", 0)
+            volume = item.get("v", 0)
+            percent_change = ((close - open_) / open_ * 100) if open_ > 0 else 0
+
+            if (
+                1 <= close <= 100
+                and volume > 1_000_000
+                and percent_change > 5
+            ):
+                valid_rows.append({
+                    "date": date_str,
+                    "ticker": ticker,
+                    "open": open_,
+                    "high": item.get("h"),
+                    "low": item.get("l"),
+                    "close": close,
+                    "volume": volume,
+                    "percent_change": round(percent_change, 2)
+                })
+
+        if valid_rows:
+            year = current.year
+            if year not in yearly_data:
+                yearly_data[year] = []
+            yearly_data[year].extend(valid_rows)
 
         current += timedelta(days=1)
 
-    save_yearly_data(last_year, year_data)
+    for year, data in yearly_data.items():
+        df = pd.DataFrame(data)
+        path = os.path.join(OUTPUT_DIR, f"{year}-data.csv")
+        df.to_csv(path, index=False)
+        print(f"[+] Saved {len(df)} entries to {path}")
 
 if __name__ == "__main__":
     main()
