@@ -1,101 +1,106 @@
 import os
 import pandas as pd
-from pathlib import Path
+from datetime import datetime, timedelta
+from polygon import RESTClient
+import time
 
-DATA_DIR = Path("backtesting/data")
-RESULTS_DIR = Path("backtesting/results")
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../data")
+START_YEAR = 2015
+END_YEAR = datetime.now().year
 
-TRADE_LOG_PATH = RESULTS_DIR / "trade_log.csv"
-SUMMARY_PATH = RESULTS_DIR / "summary.csv"
+client = RESTClient(POLYGON_API_KEY)
 
-# Define strategy parameters
-GAP_THRESHOLD = 0.04  # 4% gap up
-BREAKOUT_BUFFER = 0.01  # 1% above open to enter
-TARGET_PERCENT = 0.05  # take profit at 5%
-STOP_PERCENT = 0.03    # stop loss at 3%
 
-all_trades = []
+def fetch_grouped_daily(date_str):
+    try:
+        response = client.get_grouped_daily_aggs(
+            locale="us",
+            market="stocks",
+            date=date_str,
+            adjusted=True
+        )
+        return response.results if response.results else []
+    except Exception as e:
+        print(f"[!] Error fetching grouped data for {date_str}: {e}")
+        return []
 
-def run_backtest_for_year(year):
-    file_path = DATA_DIR / f"{year}-data.csv"
-    if not file_path.exists():
-        print(f"[!] Missing data for {year}")
-        return
 
-    df = pd.read_csv(file_path, parse_dates=["date"])
-    df.sort_values(["date", "ticker"], inplace=True)
+def fetch_news(ticker, date):
+    try:
+        news = client.list_ticker_news(ticker=ticker, published_utc=date, limit=1)
+        return len(news.results) > 0 if news.results else False
+    except:
+        return False
 
-    grouped = df.groupby("date")
 
-    for date, day_df in grouped:
-        for _, row in day_df.iterrows():
-            # Gap & Go strategy
-            prev_close = row.get("prev_close")
-            open_price = row["open"]
-            if not prev_close or pd.isna(prev_close) or prev_close == 0:
-                continue
+def percent_change(open_price, close_price):
+    if open_price == 0:
+        return 0
+    return ((close_price - open_price) / open_price) * 100
 
-            gap_percent = (open_price - prev_close) / prev_close
-            if gap_percent < GAP_THRESHOLD:
-                continue  # not a gap up
 
-            breakout_entry = open_price * (1 + BREAKOUT_BUFFER)
-            target_price = breakout_entry * (1 + TARGET_PERCENT)
-            stop_price = breakout_entry * (1 - STOP_PERCENT)
+def meets_criteria(stock, date_str):
+    try:
+        ticker = stock["T"]
+        open_price = stock["o"]
+        close_price = stock["c"]
+        volume = stock["v"]
+        is_otc = ticker.startswith("OTC")
 
-            high = row["high"]
-            low = row["low"]
-            exit_price = None
-            outcome = None
+        if is_otc or open_price < 1 or close_price > 100 or volume < 1_000_000:
+            return False
 
-            if high >= target_price:
-                exit_price = target_price
-                outcome = "win"
-            elif low <= stop_price:
-                exit_price = stop_price
-                outcome = "loss"
-            else:
-                exit_price = row["close"]
-                outcome = "neutral"
+        change = percent_change(open_price, close_price)
+        if change < 5:
+            return False
 
-            percent_gain = (exit_price - breakout_entry) / breakout_entry * 100
+        return fetch_news(ticker, date_str)
+    except Exception as e:
+        print(f"[!] Error filtering stock {stock}: {e}")
+        return False
 
-            all_trades.append({
-                "date": date.strftime("%Y-%m-%d"),
-                "ticker": row["ticker"],
-                "entry": breakout_entry,
-                "exit": exit_price,
-                "outcome": outcome,
-                "percent_gain": round(percent_gain, 2),
-                "volume": row["volume"],
-            })
 
-def summarize_results():
-    df = pd.DataFrame(all_trades)
-    df.to_csv(TRADE_LOG_PATH, index=False)
+def run_backtest():
+    for year in range(START_YEAR, END_YEAR + 1):
+        print(f"[+] Backtesting {year}...")
+        yearly_data = []
 
-    total_trades = len(df)
-    wins = df[df["outcome"] == "win"]
-    losses = df[df["outcome"] == "loss"]
-    neutrals = df[df["outcome"] == "neutral"]
+        start_date = datetime(year, 1, 1)
+        end_date = datetime(year, 12, 31)
+        current_date = start_date
 
-    summary = {
-        "Total Trades": total_trades,
-        "Wins": len(wins),
-        "Losses": len(losses),
-        "Neutrals": len(neutrals),
-        "Win Rate (%)": round(len(wins) / total_trades * 100, 2) if total_trades else 0,
-        "Avg Gain (%)": round(df["percent_gain"].mean(), 2) if total_trades else 0,
-        "Total Return (%)": round(df["percent_gain"].sum(), 2) if total_trades else 0,
-    }
+        while current_date <= end_date:
+            date_str = current_date.strftime("%Y-%m-%d")
+            stocks = fetch_grouped_daily(date_str)
 
-    pd.DataFrame([summary]).to_csv(SUMMARY_PATH, index=False)
-    print("[+] Backtest complete. Summary written to summary.csv")
+            for stock in stocks:
+                if meets_criteria(stock, date_str):
+                    yearly_data.append({
+                        "date": date_str,
+                        "ticker": stock["T"],
+                        "open": stock["o"],
+                        "high": stock["h"],
+                        "low": stock["l"],
+                        "close": stock["c"],
+                        "volume": stock["v"],
+                        "percent_change": round(percent_change(stock["o"], stock["c"]), 2)
+                    })
+
+            current_date += timedelta(days=1)
+            time.sleep(1)  # basic rate-limit control
+
+        if yearly_data:
+            df = pd.DataFrame(yearly_data, columns=[
+                "date", "ticker", "open", "high", "low", "close", "volume", "percent_change"
+            ])
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            file_path = os.path.join(OUTPUT_DIR, f"{year}-data.csv")
+            df.to_csv(file_path, index=False)
+            print(f"[+] Saved {len(df)} entries to {file_path}")
+        else:
+            print(f"[!] No qualifying entries for {year}")
+
 
 if __name__ == "__main__":
-    for year in range(2015, 2026):  # Change range as needed
-        print(f"[+] Backtesting {year}...")
-        run_backtest_for_year(year)
-
-    summarize_results()
+    run_backtest()
