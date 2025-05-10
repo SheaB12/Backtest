@@ -1,4 +1,4 @@
-name: Run Backtest Engine
+name: Run Gap and Go Backtest
 
 on:
   workflow_dispatch:
@@ -20,9 +20,9 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run backtest engine
+      - name: Run Gap and Go backtest engine
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          echo "Starting backtest engine..."
-          python scripts/run_backtest.py
+          echo "Running gap_and_go_backtest.py..."
+          python backtesting/gap_and_go_backtest.py
