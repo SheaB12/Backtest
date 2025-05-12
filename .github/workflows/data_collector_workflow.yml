@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'gap_and_go_ml_ready.py'
+      - 'Backtesting/gap_and_go_ml_ready.py'
 
 jobs:
   run-collector:
@@ -28,7 +28,7 @@ jobs:
         env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: |
-          python gap_and_go_ml_ready.py
+          python Backtesting/gap_and_go_ml_ready.py
 
       - name: Upload collected data
         uses: actions/upload-artifact@v4
