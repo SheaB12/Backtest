@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 
-DATA_DIR = "Data"
+DATA_DIR = "data"
 RESULTS_CSV = "gap_and_go_results.csv"
 SUMMARY_CSV = "gap_and_go_summary.csv"
 
