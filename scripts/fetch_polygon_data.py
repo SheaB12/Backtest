@@ -11,7 +11,7 @@ client = RESTClient(api_key=POLYGON_API_KEY)
 
 def get_grouped_data(date_str):
     try:
-        return client.get_grouped_daily_aggs(date_str)
+        return client.get_grouped_daily_aggs(date=date_str, adjusted=True)
     except Exception as e:
         print(f"[!] Error fetching {date_str}: {e}")
         return None
@@ -42,17 +42,16 @@ def calculate_features(row):
         'label': label
     })
 
-def collect_year_data(year):
-    start = datetime(year, 1, 1)
-    end = datetime(year, 12, 31)
+def collect_all_data(start_date_str="2015-05-13"):
+    current = datetime.strptime(start_date_str, "%Y-%m-%d")
+    end = datetime.now()
     all_data = []
 
-    current = start
     while current <= end:
         date_str = current.strftime("%Y-%m-%d")
         print(f"[+] Processing {date_str}...")
         grouped = get_grouped_data(date_str)
-        if not grouped:
+        if not grouped or not getattr(grouped, 'results', None):
             current += timedelta(days=1)
             continue
 
@@ -67,10 +66,7 @@ def collect_year_data(year):
             volume = ag.get('v')
             prev_close = ag.get('pc', None)
 
-            if not all([ticker, close, open_, high, low, volume]):
-                continue
-
-            if prev_close is None:
+            if not all([ticker, close, open_, high, low, volume, prev_close]):
                 continue
 
             percent_change = ((close - prev_close) / prev_close) * 100
@@ -98,13 +94,12 @@ def collect_year_data(year):
     if all_data:
         df = pd.DataFrame(all_data)
         features = df.apply(calculate_features, axis=1)
-        final_df = pd.concat([df.drop(columns=['prev_close']), features], axis=1)
-        path = os.path.join(OUTPUT_DIR, f"{year}-data.csv")
-        final_df.to_csv(path, index=False)
-        print(f"[+] Saved {len(final_df)} entries to {path}")
+        final_df = pd.concat([df.drop(columns=["prev_close"]), features], axis=1)
+        file_path = os.path.join(OUTPUT_DIR, "ml_dataset.csv")
+        final_df.to_csv(file_path, index=False)
+        print(f"[+] Saved {len(final_df)} rows to {file_path}")
     else:
-        print(f"[!] No qualifying entries for {year}")
+        print("[!] No qualifying data found.")
 
-# Example: Loop for backfill
-for year in range(2015, datetime.now().year + 1):
-    collect_year_data(year)
+if __name__ == "__main__":
+    collect_all_data("2015-05-13")
