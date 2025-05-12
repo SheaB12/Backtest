@@ -1,117 +1,93 @@
-import backtrader as bt
 import os
+import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# --- Strategy Class ---
-class GapAndGoWithPullback(bt.Strategy):
-    params = dict(
-        gap_threshold=0.05,     # 5%+ gap
-        max_float=50_000_000,   # hypothetical float filter
-        entry_buffer=0.01,      # enter a bit above premarket high
-        risk_pct=0.01,          # 1% stop
-        reward_multiplier=2     # 2R target
+API_KEY = os.getenv("POLYGON_API_KEY")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../Data")
+START_DATE = datetime(2015, 5, 13)
+END_DATE = datetime(2025, 5, 12)
+
+def fetch_grouped_data(date_str):
+    url = (
+        f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{date_str}"
+        f"?adjusted=true&include_otc=false&apiKey={API_KEY}"
     )
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json().get("results", [])
+    else:
+        print(f"[!] Error fetching grouped data for {date_str}: {response.text}")
+        return []
 
-    def __init__(self):
-        self.order = None
-        self.entry_price = None
-        self.stop_price = None
-        self.target_price = None
-        self.prev_close = None
-        self.premarket_high = None
-        self.pullback_low = None
-        self.breakout_confirmed = False
+def compute_features_and_labels(data):
+    df = pd.DataFrame(data)
+    if df.empty:
+        return pd.DataFrame()
 
-    def next(self):
-        if len(self) < 2:
-            return
+    # Feature engineering
+    df["gap_percent"] = ((df["open"] - df["prev_close"]) / df["prev_close"]) * 100
+    df["volatility"] = ((df["high"] - df["low"]) / df["open"]) * 100
+    df["target_10pct_spike"] = ((df["high"] - df["open"]) / df["open"]) >= 0.10
+    df["target_10pct_spike"] = df["target_10pct_spike"].astype(int)
 
-        current_open = self.data.open[0]
-        current_close = self.data.close[0]
-        previous_close = self.data.close[-1]
-        current_time = self.data.datetime.time(0)
+    # Drop unused columns and sort
+    return df[[
+        "date", "ticker", "open", "high", "low", "close", "volume",
+        "gap_percent", "volatility", "target_10pct_spike"
+    ]]
 
-        # GAP CHECK (only at 9:30 open)
-        if self.data.datetime.datetime(0).time() == datetime.strptime("09:30", "%H:%M").time():
-            gap_pct = (current_open - previous_close) / previous_close
-            if gap_pct > self.params.gap_threshold:
-                self.premarket_high = max([self.data.high[-i] for i in range(1, 16)])  # simulate premarket high
-                self.prev_close = previous_close
-                self.breakout_confirmed = True
-            else:
-                self.breakout_confirmed = False
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    current = START_DATE
+    yearly_data = {}
 
-        # GAP AND GO BREAKOUT
-        if self.breakout_confirmed and not self.position and not self.order:
-            if current_close > self.premarket_high * (1 + self.params.entry_buffer):
-                self.entry_price = current_close
-                self.stop_price = self.entry_price * (1 - self.params.risk_pct)
-                self.target_price = self.entry_price * (1 + self.params.risk_pct * self.params.reward_multiplier)
-                print(f"[BUY] {self.datetime.datetime(0)} - Entry: {self.entry_price:.2f}")
-                self.order = self.buy()
+    while current <= END_DATE:
+        date_str = current.strftime("%Y-%m-%d")
+        print(f"[+] Processing {date_str}...")
+        results = fetch_grouped_data(date_str)
 
-        # MICRO PULLBACK ENTRY (only after breakout)
-        if self.position and not self.order:
-            if self.pullback_low is None and current_close < self.data.close[-1] < self.data.close[-2]:
-                self.pullback_low = self.data.low[0]
-            elif self.pullback_low and current_close > self.data.close[-1]:
-                print(f"[ADD] Micro pullback confirmed at {self.datetime.datetime(0)}")
-                self.buy()
-                self.pullback_low = None  # Reset
+        valid_rows = []
+        for item in results:
+            try:
+                close = item["c"]
+                open_ = item["o"]
+                prev_close = item["pc"]
+                volume = item["v"]
+                percent_change = ((close - open_) / open_ * 100) if open_ > 0 else 0
 
-        # EXIT
-        if self.position:
-            if current_close >= self.target_price:
-                print(f"[SELL - TP] {self.datetime.datetime(0)} @ {current_close:.2f}")
-                self.close()
-            elif current_close <= self.stop_price:
-                print(f"[SELL - SL] {self.datetime.datetime(0)} @ {current_close:.2f}")
-                self.close()
+                if (
+                    1 <= close <= 100
+                    and volume > 1_000_000
+                    and percent_change > 5
+                ):
+                    valid_rows.append({
+                        "date": date_str,
+                        "ticker": item["T"],
+                        "open": open_,
+                        "high": item["h"],
+                        "low": item["l"],
+                        "close": close,
+                        "volume": volume,
+                        "prev_close": prev_close
+                    })
+            except KeyError:
+                continue
 
-    def notify_order(self, order):
-        if order.status in [order.Completed, order.Canceled, order.Margin]:
-            self.order = None
+        if valid_rows:
+            year = current.year
+            if year not in yearly_data:
+                yearly_data[year] = []
+            yearly_data[year].extend(valid_rows)
 
+        current += timedelta(days=1)
 
-# --- Data Loader ---
-def load_csv_as_feed(filepath):
-    return bt.feeds.GenericCSVData(
-        dataname=filepath,
-        timeframe=bt.TimeFrame.Minutes,
-        compression=1,
-        dtformat='%Y-%m-%d %H:%M:%S',
-        datetime=0,
-        open=1,
-        high=2,
-        low=3,
-        close=4,
-        volume=5,
-        openinterest=-1,
-        headers=True
-    )
+    for year, data in yearly_data.items():
+        df = compute_features_and_labels(data)
+        if not df.empty:
+            path = os.path.join(OUTPUT_DIR, f"{year}.csv")
+            df.to_csv(path, index=False)
+            print(f"[+] Saved {len(df)} ML entries to {path}")
 
-
-# --- Backtest Runner ---
-def run_backtest(csv_file):
-    cerebro = bt.Cerebro()
-    cerebro.addstrategy(GapAndGoWithPullback)
-
-    data = load_csv_as_feed(csv_file)
-    cerebro.adddata(data)
-
-    cerebro.broker.set_cash(10_000)
-    cerebro.broker.setcommission(commission=0.0025)
-    cerebro.addsizer(bt.sizers.FixedSize, stake=100)
-
-    print(f"\nStarting Portfolio Value: ${cerebro.broker.getvalue():.2f}")
-    cerebro.run()
-    print(f"Final Portfolio Value: ${cerebro.broker.getvalue():.2f}")
-    cerebro.plot()
-
-
-# --- Entry Point ---
-if __name__ == '__main__':
-    ticker = "AAPL"
-    csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', f'{ticker}_1min.csv')
-    run_backtest(csv_path)
+if __name__ == "__main__":
+    main()
