@@ -28,3 +28,9 @@ jobs:
       - name: Run training script
         run: |
           python ml_training/train_gap_and_go_model.py
+
+      - name: Upload trained model artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: gap-and-go-model
+          path: gap_and_go_model.pkl
