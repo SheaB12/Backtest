@@ -1,12 +1,12 @@
 import os
 import pandas as pd
 
-DATA_DIR = "data"
+DATA_DIR = "Data"
 RESULTS_CSV = "gap_and_go_results.csv"
 SUMMARY_CSV = "gap_and_go_summary.csv"
 
 def load_data_files():
-    return sorted([f for f in os.listdir(DATA_DIR) if f.endswith("-data.csv")])
+    return sorted([f for f in os.listdir(DATA_DIR) if f.endswith(".csv")])
 
 def simulate_trade(row):
     open_price = row["open"]
@@ -21,10 +21,12 @@ def simulate_trade(row):
         "ticker": row["ticker"],
         "open": open_price,
         "high": high_price,
+        "low": row["low"],
         "close": close_price,
         "volume": row["volume"],
-        "percent_change": row["percent_change"],
-        "gain_pct": actual_gain * 100,
+        "gap_percent": row.get("gap_percent", row.get("percent_change", 0)),
+        "volatility": row.get("volatility", None),
+        "gain_pct": round(actual_gain * 100, 2),
         "outcome": "win" if actual_gain >= target_gain else "loss",
     }
     return result
@@ -54,11 +56,16 @@ if __name__ == "__main__":
     all_trades = []
 
     for file in all_files:
+        path = os.path.join(DATA_DIR, file)
         print(f"[+] Backtesting {file}...")
-        df = pd.read_csv(os.path.join(DATA_DIR, file))
+        df = pd.read_csv(path)
 
-        # Strategy criteria: Gap and Go (gap up > 5%)
-        filtered = df[df["percent_change"] > 5]
+        if "gap_percent" not in df.columns:
+            print(f"[!] Skipping {file} (missing gap_percent)")
+            continue
+
+        # Strategy: Gap and Go (gap up > 5%)
+        filtered = df[df["gap_percent"] > 5]
 
         trades = [simulate_trade(row) for _, row in filtered.iterrows()]
         all_trades.extend(trades)
