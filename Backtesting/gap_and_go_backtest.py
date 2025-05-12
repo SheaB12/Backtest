@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 API_KEY = os.getenv("POLYGON_API_KEY")
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../data")
-START_DATE = datetime(2015, 1, 1)
+START_DATE = datetime(2015, 5, 13)
 END_DATE = datetime.today()
 
 def fetch_grouped_data(date_str):
