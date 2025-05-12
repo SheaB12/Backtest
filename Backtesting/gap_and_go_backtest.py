@@ -1,72 +1,78 @@
 import os
-import requests
 import pandas as pd
-from datetime import datetime, timedelta
 
-API_KEY = os.getenv("POLYGON_API_KEY")
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "../data")
-START_DATE = datetime(2015, 6, 13)
-END_DATE = datetime.today()
+DATA_DIR = "data"
+RESULTS_CSV = "gap_and_go_results.csv"
+SUMMARY_CSV = "gap_and_go_summary.csv"
 
-def fetch_grouped_data(date_str):
-    url = (
-        f"https://api.polygon.io/v2/aggs/grouped/locale/us/market/stocks/{date_str}"
-        f"?adjusted=true&include_otc=false&apiKey={API_KEY}"
-    )
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json().get("results", [])
-    else:
-        print(f"[!] Error fetching grouped data for {date_str}: {response.text}")
-        return []
+def load_data_files():
+    return sorted([f for f in os.listdir(DATA_DIR) if f.endswith(".csv")])
 
-def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    current = START_DATE
-    yearly_data = {}
+def simulate_trade(row):
+    open_price = row["open"]
+    high_price = row["high"]
+    close_price = row["close"]
 
-    while current <= END_DATE:
-        date_str = current.strftime("%Y-%m-%d")
-        print(f"[+] Processing {date_str}...")
-        results = fetch_grouped_data(date_str)
+    target_gain = 0.02  # 2%
+    actual_gain = (high_price - open_price) / open_price
 
-        valid_rows = []
-        for item in results:
-            ticker = item.get("T")
-            close = item.get("c", 0)
-            open_ = item.get("o", 0)
-            volume = item.get("v", 0)
-            percent_change = ((close - open_) / open_ * 100) if open_ > 0 else 0
+    result = {
+        "date": row["date"],
+        "ticker": row["ticker"],
+        "open": open_price,
+        "high": high_price,
+        "low": row["low"],
+        "close": close_price,
+        "volume": row["volume"],
+        "gap_percent": row.get("gap_percent", row.get("percent_change", 0)),
+        "volatility": row.get("volatility", None),
+        "gain_pct": round(actual_gain * 100, 2),
+        "outcome": "win" if actual_gain >= target_gain else "loss",
+    }
+    return result
 
-            if (
-                1 <= close <= 100
-                and volume > 1_000_000
-                and percent_change > 5
-            ):
-                valid_rows.append({
-                    "date": date_str,
-                    "ticker": ticker,
-                    "open": open_,
-                    "high": item.get("h"),
-                    "low": item.get("l"),
-                    "close": close,
-                    "volume": volume,
-                    "percent_change": round(percent_change, 2)
-                })
+def summarize_results():
+    df = pd.read_csv(RESULTS_CSV)
 
-        if valid_rows:
-            year = current.year
-            if year not in yearly_data:
-                yearly_data[year] = []
-            yearly_data[year].extend(valid_rows)
+    wins = df[df["outcome"] == "win"]
+    losses = df[df["outcome"] == "loss"]
+    total = len(df)
 
-        current += timedelta(days=1)
+    summary = {
+        "Total Trades": total,
+        "Wins": len(wins),
+        "Losses": len(losses),
+        "Win Rate (%)": round(len(wins) / total * 100, 2) if total else 0,
+        "Average Gain (%)": round(df["gain_pct"].mean(), 2) if total else 0,
+        "Total Return (%)": round(df["gain_pct"].sum(), 2) if total else 0,
+    }
 
-    for year, data in yearly_data.items():
-        df = pd.DataFrame(data)
-        path = os.path.join(OUTPUT_DIR, f"{year}-data.csv")
-        df.to_csv(path, index=False)
-        print(f"[+] Saved {len(df)} entries to {path}")
+    pd.DataFrame([summary]).to_csv(SUMMARY_CSV, index=False)
+    print(f"[+] Saved summary to {SUMMARY_CSV}")
+    print(summary)
 
 if __name__ == "__main__":
-    main()
+    all_files = load_data_files()
+    all_trades = []
+
+    for file in all_files:
+        path = os.path.join(DATA_DIR, file)
+        print(f"[+] Backtesting {file}...")
+        df = pd.read_csv(path)
+
+        if "gap_percent" not in df.columns:
+            print(f"[!] Skipping {file} (missing gap_percent)")
+            continue
+
+        # Strategy: Gap and Go (gap up > 5%)
+        filtered = df[df["gap_percent"] > 5]
+
+        trades = [simulate_trade(row) for _, row in filtered.iterrows()]
+        all_trades.extend(trades)
+
+    if all_trades:
+        pd.DataFrame(all_trades).to_csv(RESULTS_CSV, index=False)
+        print(f"[+] Saved {len(all_trades)} trades to {RESULTS_CSV}")
+        summarize_results()
+    else:
+        print("[!] No trades matched the strategy.")
