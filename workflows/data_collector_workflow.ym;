@@ -1,0 +1,37 @@
+name: Run Data Collector
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Backtesting/gap_and_go_ml_ready.py'
+
+jobs:
+  run-collector:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas requests
+
+      - name: Run data collector script
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          python Backtesting/gap_and_go_ml_ready.py
+
+      - name: Upload collected data
+        uses: actions/upload-artifact@v4
+        with:
+          name: gap-and-go-data
+          path: data/*.csv
