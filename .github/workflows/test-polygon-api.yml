@@ -1,0 +1,33 @@
+name: Test Polygon API Fetch
+
+on:
+  workflow_dispatch:  # Manual run from GitHub UI
+
+jobs:
+  test-fetch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.10
+
+      - name: Install Dependencies
+        run: |
+          pip install requests
+
+      - name: Run Polygon API Test
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          python scripts/polygon_test_fetch.py
+
+      - name: Upload Raw JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: polygon_raw_data
+          path: polygon_raw_*.json
