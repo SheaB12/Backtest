@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 
 API_KEY = os.getenv("POLYGON_API_KEY")
 OUTPUT_DIR = "data"
-DEBUG_LOG = "debug_filtered_tickers.csv"
-START_DATE = datetime(2023, 1, 1)  # Adjusted to recent supported dates
+DEBUG_FILTERED = "debug_filtered_tickers.csv"
+DEBUG_ALL = "debug_all_tickers.csv"
+START_DATE = datetime(2023, 1, 1)
 END_DATE = datetime(2023, 1, 7)
 
 def fetch_grouped_data(date_str):
@@ -38,10 +39,11 @@ def compute_features_and_labels(data):
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    debug_rows = []
-    current = START_DATE
+    debug_filtered = []
+    debug_all = []
     yearly_data = {}
 
+    current = START_DATE
     while current <= END_DATE:
         date_str = current.strftime("%Y-%m-%d")
         print(f"[+] Processing {date_str}...")
@@ -55,7 +57,21 @@ def main():
                 open_ = item.get("o")
                 prev_close = item.get("pc")
                 volume = item.get("v")
+                high = item.get("h")
+                low = item.get("l")
                 ticker = item.get("T")
+
+                # Log everything regardless of filtering
+                debug_all.append({
+                    "date": date_str,
+                    "ticker": ticker,
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": volume,
+                    "prev_close": prev_close
+                })
 
                 if not all([open_, close, prev_close, volume]):
                     continue
@@ -67,23 +83,24 @@ def main():
                     and volume > 1_000_000
                     and percent_change > 5
                 ):
-                    valid_rows.append({
+                    row = {
                         "date": date_str,
                         "ticker": ticker,
                         "open": open_,
-                        "high": item.get("h"),
-                        "low": item.get("l"),
+                        "high": high,
+                        "low": low,
                         "close": close,
                         "volume": volume,
                         "prev_close": prev_close
-                    })
+                    }
+                    valid_rows.append(row)
+                    debug_filtered.append(row)
+
             except Exception as e:
                 print(f"[!] Exception while parsing row: {e}")
                 continue
 
         print(f"  Filtered {len(valid_rows)} valid rows")
-
-        debug_rows.extend(valid_rows)
 
         if valid_rows:
             year = current.year
@@ -102,9 +119,13 @@ def main():
         else:
             print(f"[!] No trades met criteria for year {year}")
 
-    if debug_rows:
-        pd.DataFrame(debug_rows).to_csv(DEBUG_LOG, index=False)
-        print(f"[+] Debug log saved to {DEBUG_LOG}")
+    if debug_filtered:
+        pd.DataFrame(debug_filtered).to_csv(DEBUG_FILTERED, index=False)
+        print(f"[+] Debug filtered log saved to {DEBUG_FILTERED}")
+
+    if debug_all:
+        pd.DataFrame(debug_all).to_csv(DEBUG_ALL, index=False)
+        print(f"[+] Debug ALL tickers log saved to {DEBUG_ALL}")
 
 if __name__ == "__main__":
     main()
