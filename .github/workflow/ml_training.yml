@@ -1,0 +1,36 @@
+name: Train Gap and Go Model
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ml_training/train_gap_and_go_model.py'
+      - 'Data/**'
+
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas scikit-learn joblib
+
+      - name: Run training script
+        run: |
+          python ml_training/train_gap_and_go_model.py
+
+      - name: Upload trained model artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: gap-and-go-model
+          path: gap_and_go_model.pkl
