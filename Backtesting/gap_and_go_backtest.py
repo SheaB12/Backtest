@@ -56,8 +56,8 @@ def main():
 
                 if (
                     1 <= close <= 100
-                    and volume > 1_000_000
-                    and percent_change > 5
+                    and volume > 100_000
+                    and percent_change > 3
                 ):
                     valid_rows.append({
                         "date": date_str,
