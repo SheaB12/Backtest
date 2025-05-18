@@ -1,11 +1,16 @@
-name: Run Gap and Go Backtest
+name: Penny Stock Backtest
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Allow manual triggering from GitHub UI
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at 00:00 UTC
 
 jobs:
-  backtest:
+  run-backtest:
     runs-on: ubuntu-latest
+
+    env:
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
 
     steps:
       - name: Checkout repository
@@ -14,15 +19,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.11
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install pandas requests
 
-      - name: Run Gap and Go backtest engine
-        env:
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: |
-          echo "Running gap_and_go_backtest.py..."
-          python Backtesting/gap_and_go_backtest.py
+      - name: Run penny stock backtest
+        run: python your_script_name.py  # Replace with actual filename
+
+      - name: Upload data folder as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: backtest-csvs
+          path: data/
