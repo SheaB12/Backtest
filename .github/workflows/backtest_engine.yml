@@ -1,4 +1,4 @@
-name: gap_and_go
+name: gap_and_go_backtest.py
 
 on:
   workflow_dispatch:  # Manual run
