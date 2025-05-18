@@ -1,4 +1,4 @@
-name: Penny Stock Backtest
+name: gap_and_go
 
 on:
   workflow_dispatch:  # Manual run
