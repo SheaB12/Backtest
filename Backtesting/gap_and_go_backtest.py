@@ -30,7 +30,7 @@ def compute_features_and_labels(data):
     df["target_10pct_spike"] = ((df["high"] - df["open"]) / df["open"]) >= 0.10
     df["target_10pct_spike"] = df["target_10pct_spike"].astype(int)
 
-    return df[[
+    return df[[ 
         "date", "ticker", "open", "high", "low", "close", "volume",
         "gap_percent", "volatility", "target_10pct_spike"
     ]]
@@ -49,25 +49,16 @@ def main():
         for item in results:
             try:
                 close = item["c"]
-                open_ = item["o"]
-                prev_close = item["pc"]
-                volume = item["v"]
-                percent_change = ((close - open_) / open_ * 100) if open_ > 0 else 0
-
-                if (
-                    1 <= close <= 100
-                    and volume > 100_000
-                    and percent_change > 3
-                ):
+                if 1 <= close <= 50:
                     valid_rows.append({
                         "date": date_str,
                         "ticker": item["T"],
-                        "open": open_,
+                        "open": item["o"],
                         "high": item["h"],
                         "low": item["l"],
                         "close": close,
-                        "volume": volume,
-                        "prev_close": prev_close
+                        "volume": item["v"],
+                        "prev_close": item["pc"]
                     })
             except KeyError:
                 continue
