@@ -1,4 +1,4 @@
-name: Penny Stock Backtest
+name: gap_and_go_backtest
 
 on:
   workflow_dispatch:  # Allow manual triggering from GitHub UI
